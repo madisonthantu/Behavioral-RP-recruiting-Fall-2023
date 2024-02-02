@@ -1,0 +1,387 @@
+# Additional links:
+- Link to [Rmd](https://github.com/madisonthantu/Behavioral-RP-recruiting-Fall-2023/blob/main/data_analysis_task.html) file 
+  - https://github.com/madisonthantu/Behavioral-RP-recruiting-Fall-2023/blob/main/data_analysis_task.html
+- Link to [html](https://github.com/madisonthantu/Behavioral-RP-recruiting-Fall-2023/blob/main/data_analysis_task.html) file 
+  - https://github.com/madisonthantu/Behavioral-RP-recruiting-Fall-2023/blob/main/data_analysis_task.html
+
+# Data Analysis Task 1
+
+**Clean the data. Consider what variables you might use to exclude observations.**
+
+- Variables used for exclusion: If variable x != y, then exclude sample
+  - Progress = 100%
+  - Finished = True
+  - consent = Agree
+  - QID54_First Click, QID54_Last Click, QID54_Page Submit, QID54_Click Count != nan
+  - passedattn = 'yes'
+
+```{R task1-read-and-clean, LoadPackages}
+
+library(readxl)
+# REF: https://stackoverflow.com/questions/2631780/set-the-plot-title-to-wrap-around-and-shrink-the-text-to-fit-the-plot
+wrapper <- function(x, ...) 
+{
+  paste(strwrap(x, ...), collapse = "\n")
+}
+# Read in data
+# REF: https://stackoverflow.com/questions/47066336/trying-to-knit-but-cant-because-read-excel-function-is-not-being-recognized-in
+data <- read_excel("Data - Fall 2023.xlsx", sheet = "Data")
+df <- data.frame(data)
+# unique(df[["UserLanguage"]])
+
+# REF: https://chryswoods.com/beginning_r/dictionaries.html
+col_val_constraints <- c("Progress"=100, "Finished"=TRUE, "consent"="AGREE", "passedattn"="yes")
+
+# colnames(df)
+# Removing samples based on exclusion criteria
+df_cleaned <- subset(x = df,
+    subset = Progress == 100 &
+             Finished == TRUE &
+             consent == "AGREE" &
+             passedattn == "yes" &
+             !is.na(QID54_First.Click) &
+             !is.na(QID54_Last.Click) &
+             !is.na(QID54_Page.Submit) &
+             !is.na(QID54_Click.Count))
+
+# unique(df[["UserLanguage"]])
+summary(df_cleaned)
+
+# For task 2, question (c)
+df_c <- subset(df_cleaned, select = c(
+    ResponseId,
+    outcome_binary1
+    ))
+# Keeping only relevant columns
+df_cleaned <- subset(df_cleaned, select = c(
+    Progress, 
+    ResponseId,
+    feelings_youalone,
+    feelings_bothyoufirst,
+    feelings_themalone,
+    feelings_boththemfirst,
+    feelings_neither,
+    feelings_youaloneforgiven,
+    initiator_type
+    ))
+
+# colnames(df_cleaned)
+# df_cleaned
+```
+
+**Restructure the data as needed. (Hint: Within-subjects variables require making a “long” version of the dataset.)**
+```{R task1-create-long}
+library(reshape)
+
+# Creating a long version of the cleaned dataset
+# REF: https://www.digitalocean.com/community/tutorials/r-melt-and-cast-function
+df_long <- melt(df_cleaned, id = c("ResponseId","initiator_type")) 
+
+dim(df_long)
+```
+
+**Include significance testing.**
+**Include all code for reproducing your analyses and figures.**
+
+### 1. Whether people care about getting a return apology after being the first to apologize; 
+
+- Conduct significance testing on variables of: 'feelings_youalone' v. 'feelings_bothyoufirst'
+
+```{R task1-q1}
+library(stats)
+library(ggplot2)
+library(jtools)
+
+df_q1 <- subset(df_cleaned, select = c(
+    ResponseId,
+    feelings_youalone,
+    feelings_bothyoufirst
+    ))
+# REF: https://www.r-bloggers.com/2021/10/paired-sample-t-test-using-r/
+df_q1_long <- melt(df_q1, id="ResponseId") 
+# attach(df_q1_long)
+# Summary statistics of `feelings_youalone` v. `feelings_bothyoufirst`
+by(data = df_q1_long, 
+   INDICES = df_q1_long[["variable"]], 
+   FUN = summary)
+
+lapply(df_q1[,c("feelings_bothyoufirst", "feelings_youalone")], sd)
+
+# Correlation test
+feelings_youalone <- df_q1[["feelings_youalone"]]
+feelings_bothyoufirst <- df_q1[["feelings_bothyoufirst"]]
+cor.test(x = feelings_youalone, y = feelings_bothyoufirst, 
+         method = c("pearson"), 
+         conf.level = 0.95)
+t.test(feelings_youalone,
+    feelings_bothyoufirst,
+    paired=TRUE)
+
+# REF: http://www.sthda.com/english/wiki/ggplot2-box-plot-quick-start-guide-r-software-and-data-visualization
+png("q1_box_plot.png")
+p <- ggplot(df_q1_long, aes(x=variable, y=value)) + 
+    geom_boxplot() +
+    xlab("Scenario") + ylab("Sentiment score") +
+    theme_apa(legend.font.size = 16,
+      x.font.size = 16,
+      y.font.size = 16,
+      facet.title.size = 16)  +
+    theme(aspect.ratio = 1/2,
+      legend.title = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      plot.title = element_text(hjust=0.5)) +
+    scale_y_continuous(breaks=seq(-30,30,10)) + 
+    ggtitle(wrapper("Distribution of sentiment scores for receiving a return apology versus not", width = 70))
+print(p)
+dev.off()
+p
+
+# Homogeneity in variances - above REF
+bartlett.test(df_q1_long[["value"]] ~ df_q1_long[["variable"]])
+# Paired samples t-test - REF: https://www.statmethods.net/stats/ttest.html
+q1.t_test <- t.test(
+    formula=df_q1_long[["value"]] ~ df_q1_long[["variable"]],
+    paired=TRUE)
+q1.t_test
+# detach(df_q1_long)
+```
+  
+### 2. Whether this varies as function of individual differences in “initiator type”; and
+
+- 'initiator_type' variable
+
+```{R task1-q2}  
+library(dplyr)
+library(car)
+
+# REF: https://www.scribbr.com/statistics/anova-in-r/
+df_q2 <- subset(df_cleaned, select = c(
+    ResponseId,
+    feelings_youalone,
+    feelings_bothyoufirst,
+    initiator_type
+    ))
+
+df_q2_long <- melt(df_q2, id=c("ResponseId", "initiator_type") )
+# attach(df_q2_long)
+
+group_by(df_q2_long, initiator_type, variable) %>%
+  summarise(
+    mean = round(mean(value, na.rm = TRUE), 4),
+    sd = round(sd(value, na.rm = TRUE), 4),
+    count = length(value)
+  )
+
+aov1.results <- aov(value ~ variable + initiator_type + variable:initiator_type, data=df_q2_long)
+print("Type I ANOVA, assuming no significant interaction")
+summary(aov1.results)
+
+aov_mod <- lm(value ~ variable*initiator_type, data=df_q2_long)
+# print("Type II ANOVA, assuming no significant interaction")
+# Anova(aov_mod.results, type=2)
+print("Type III ANOVA, assuming significant interaction")
+Anova(aov_mod, type=3)
+
+png("q2_box_plot.png")
+p <- ggplot(df_q2_long, aes(x=variable, y=value, fill=initiator_type)) + 
+    geom_boxplot() +
+    xlab("Scenario") + ylab("Sentiment score") + 
+    labs(fill='Initiator Type') +
+    theme_apa(legend.font.size = 12,
+      x.font.size = 16,
+      y.font.size = 16,
+      facet.title.size = 16,
+      legend.use.title = TRUE) +
+    theme(aspect.ratio = 1/2,
+      legend.title = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      plot.title = element_text(hjust=0.5)) +
+    scale_y_continuous(breaks=seq(-30,30,10)) +
+    ggtitle(wrapper("Distribution of sentiment scores for receiving a return apology versus not, according to initiator type", width = 70))
+print(p)
+dev.off()
+p
+
+# detach(df_q2_long)
+```
+
+### 3. Whether a return apology is simply viewed as a form of forgiveness. 
+
+- Conduct significance testing on variables of: 'feelings_bothyoufirst' v. 'feelings_youaloneforgiven'
+
+```{R task1-q3}
+df_q3 <- subset(df_cleaned, select = c(
+    ResponseId,
+    feelings_youalone,
+    feelings_youaloneforgiven,
+    feelings_bothyoufirst
+    ))
+# Correlation test
+cor.test(x = df_q3[["feelings_youaloneforgiven"]], y = df_q3[["feelings_bothyoufirst"]], 
+         method = c("pearson"), 
+         conf.level = 0.95)
+
+# REF: https://www.r-bloggers.com/2021/10/paired-sample-t-test-using-r/
+df_q3_long <- melt(df_q3, id="ResponseId") 
+# attach(df_q3_long)
+# Summary statistics of `feelings_youalone` v. `feelings_bothyoufirst`
+group_by(df_q3_long, variable) %>%
+  summarise(
+    mean = round(mean(value, na.rm = TRUE), 6),
+    sd = round(sd(value, na.rm = TRUE), 6),
+    count = length(value)
+  )
+
+# Plotting - above REF
+png("q3_box_plot.png")
+p <- ggplot(df_q3_long, aes(x=variable, y=value)) + 
+    geom_boxplot() +
+    xlab("Scenario") + ylab("Sentiment score") +
+    theme_apa(legend.font.size = 16,
+      x.font.size = 16,
+      y.font.size = 16,
+      facet.title.size = 16)  +
+    theme(aspect.ratio = 1/2,
+      legend.title = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      plot.title = element_text(hjust=0.5)) +
+    scale_y_continuous(breaks=seq(-30,30,10)) +
+    ggtitle(wrapper("Distribution of sentiment scores for receiving a return apology versus no return apology versus receiving forgiveness", width = 70))
+print(p)
+dev.off()
+p
+
+# Homogeneity in variances - above REF
+bartlett.test(value ~ variable, data = df_q3_long)
+
+t.test(df_q3[,"feelings_youaloneforgiven"],
+    df_q3[,"feelings_bothyoufirst"],
+    paired=TRUE)
+
+pairwise.t.test(df_q3_long[["value"]], df_q3_long[["variable"]], p.adjust.method = "bonferroni", paired = TRUE)
+
+# detach(df_q3_long)
+```
+
+# Data Analysis Task 2
+
+### (a) Produce a single bar graph that shows the average of the “feelings” variable for all six scenarios, in order of decreasing value. Include error bars (standard errors or confidence intervals). Label fully. Describe your observations in 1-2 sentences.
+
+**Describe your observations in 1-2 sentences.**
+
+In general, participants associated the highest positive sentiments with scenarios in which both them and the other person apologizes. Additionally, the scenarios in which no apoogy is received from the other person are associated with negative sentiments, even if the other person explicitly provides their forgiveness.
+
+
+```{R task2-qA}
+
+df_a <- subset(df_cleaned, select = c(
+    ResponseId,
+    feelings_youalone,
+    feelings_bothyoufirst,
+    feelings_themalone,
+    feelings_boththemfirst,
+    feelings_neither,
+    feelings_youaloneforgiven
+    ))
+df_a_long <- melt(df_a, value.name = "scenario", id = 'ResponseId')
+colnames(df_a_long)[2] ="scenario"
+# attach(df_a_long)
+
+# REF: http://www.sthda.com/english/wiki/ggplot2-error-bars-quick-start-guide-r-software-and-data-visualization
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+ return(data_sum)
+}
+data_summ <- data_summary(df_a_long, varname="value", 
+                    groupnames=c("scenario"))
+
+# REFs: 
+# - http://www.sthda.com/english/wiki/ggplot2-barplots-quick-start-guide-r-software-and-data-visualization
+# - https://stackoverflow.com/questions/30183199/ggplot2-plot-mean-with-geom-bar
+png("task2_qA_bar_plot.png")
+p<-ggplot(data=data_summ) +
+    geom_bar(
+        aes(x=reorder(scenario, -mean), y=mean), 
+            position = "dodge", stat = "identity", width=0.9) +
+    xlab("Scenario") + ylab("Mean sentiment score") +
+    theme_apa(legend.font.size = 12,
+      x.font.size = 16,
+      y.font.size = 16,
+      facet.title.size = 16,
+      legend.use.title = TRUE) +
+    theme(aspect.ratio = 1/2,
+      legend.title = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12, angle = 90),
+      plot.title = element_text(hjust=0.5)) +
+    scale_y_continuous(breaks=seq(-30,30,5)) +
+    ggtitle("Avg. `feelings` score by scenario")
+    geom_errorbar(
+        aes(x=scenario, ymin=mean-sd, ymax=mean+sd), 
+        width=0.4, colour="orange", alpha=0.9, size=1.3)
+print(p)
+dev.off()
+p
+
+# detach(df_a_long)
+```
+
+### (b) Conduct a one way ANOVA to determine if there are differences in feelings across the six scenarios.
+```{R task2-qB-1}
+# REF: http://www.sthda.com/english/wiki/one-way-anova-test-in-r
+# Compute the analysis of variance
+res.aov <- aov(value ~ scenario, data = df_a_long)
+# Summary of the analysis
+summary(res.aov)
+```
+
+### Then perform pairwise t-tests to compare “feelings_youalone” to the other five scenarios.
+```{R task2-qB-2}
+pairwise.t.test(df_a_long[["value"]], df_a_long[["scenario"]], p.adjust.method = "bonferroni", paired = TRUE)
+```
+
+**Describe your observations in 1-2 sentences.**
+
+The results of these pairwise t-test show that the differences of the `feelings_youalone` scenario with the scenarios of `feelings_bothyoufirst`, `feelings_themalone`, `feelings_boththemfirst` are statistically significant, which supports the observations made above that scenarios in which the other person apologizes are significantly different from the case in which the other person does not apologize.
+
+### (c) Create a graph showing the proportion of people choosing each of the different options for the following variable: outcome_binary1.
+```{R task2-qC-1}
+bin_opts <- c("I apologize first, then \n${e://Field/initials} apologizes.\n", "Neither I nor \n${e://Field/initials} apologizes.\n")
+t <- as.data.frame(table(df_c[["outcome_binary1"]], dnn = list("preferred_outcome")), responseName = "freq")
+t$total <- sum(t$freq)
+t$bin_label <- c("Outcome 1", "Outcome 2")
+
+plot <- ggplot(data=t, aes(x=bin_label, y=freq/total, fill=preferred_outcome)) +
+    geom_bar(stat="identity") +
+    ggtitle("Preferred outcome proportions") + 
+    xlab("Outcome preference") + ylab("Proportion") +
+    scale_fill_discrete(name = "Preferred outcome", labels = bin_opts) +
+    theme_apa(legend.font.size = 12,
+      x.font.size = 16,
+      y.font.size = 16,
+      facet.title.size = 16,
+      legend.use.title = TRUE) +
+    theme(aspect.ratio = 1/2,
+      legend.title = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      plot.title = element_text(hjust=0.5),
+      legend.position = c(0.75, 0.75))
+
+plot
+```
+
+### Conduct a test to determine if the proportion differences across the answers are significantly different from one another.
+```{R task2-qC-2}
+# REF: https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/prop.test
+prop.test(x = t$freq, n = t$total)
+```
